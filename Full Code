@@ -1,0 +1,265 @@
+from abc import ABC, abstractmethod
+from typing import Dict, Any, List
+
+# User Management
+class User:
+    def __init__(self, username: str, password: str, role: str = "user"):
+        self._username = username
+        self._password = password
+        self._role = role
+
+    @property
+    def username(self) -> str:
+        return self._username
+
+    @property
+    def role(self) -> str:
+        return self._role
+
+    def set_role(self, new_role: str):
+        if new_role not in {"user", "admin"}:
+            raise ValueError("Invalid role")
+        self._role = new_role
+
+    def verify_password(self, password: str) -> bool:
+        return self._password == password
+
+
+class UserManager:
+    def __init__(self):
+        self._users: Dict[str, User] = {}
+
+    def register_user(self, username: str, password: str):
+        if username in self._users:
+            raise ValueError("Username already exists")
+        self._users[username] = User(username, password)
+
+    def login_user(self, username: str, password: str) -> User:
+        user = self._users.get(username)
+        if not user or not user.verify_password(password):
+            raise PermissionError("Invalid credentials")
+        return user
+
+
+# Artwork Base Class
+class Artwork(ABC):
+    def __init__(self, title: str, artist: str, year: int):
+        self.title = title
+        self.artist = artist
+        self.year = year
+        self.owner: str | None = None
+
+    @abstractmethod
+    def display_info(self) -> str:
+        pass
+
+    @abstractmethod
+    def to_dict(self) -> Dict[str, Any]:
+        pass
+
+# Artwork Types
+class Painting(Artwork):
+    def __init__(self, title: str, artist: str, year: int, medium: str):
+        super().__init__(title, artist, year)
+        self.medium = medium
+
+    def display_info(self) -> str:
+        return f"{self.title} by {self.artist} ({self.year}) | Painting ({self.medium})"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": "painting",
+            "title": self.title,
+            "artist": self.artist,
+            "year": self.year,
+            "medium": self.medium,
+            "owner": self.owner,
+        }
+
+    @staticmethod
+    def from_dict(data: Dict[str, Any]) -> "Painting":
+        art = Painting(data["title"], data["artist"], data["year"], data["medium"])
+        art.owner = data.get("owner")
+        return art
+
+
+class Sculpture(Artwork):
+    def __init__(self, title: str, artist: str, year: int, material: str):
+        super().__init__(title, artist, year)
+        self.material = material
+
+    def display_info(self) -> str:
+        return f"{self.title} by {self.artist} ({self.year}) | Sculpture ({self.material})"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": "sculpture",
+            "title": self.title,
+            "artist": self.artist,
+            "year": self.year,
+            "material": self.material,
+            "owner": self.owner,
+        }
+
+    @staticmethod
+    def from_dict(data: Dict[str, Any]) -> "Sculpture":
+        art = Sculpture(data["title"], data["artist"], data["year"], data["material"])
+        art.owner = data.get("owner")
+        return art
+
+
+class DigitalArt(Artwork):
+    def __init__(self, title: str, artist: str, year: int, file_type: str):
+        super().__init__(title, artist, year)
+        self.file_type = file_type
+
+    def display_info(self) -> str:
+        return f"{self.title} by {self.artist} ({self.year}) | Digital ({self.file_type})"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": "digital",
+            "title": self.title,
+            "artist": self.artist,
+            "year": self.year,
+            "file_type": self.file_type,
+            "owner": self.owner,
+        }
+
+    @staticmethod
+    def from_dict(data: Dict[str, Any]) -> "DigitalArt":
+        art = DigitalArt(data["title"], data["artist"], data["year"], data["file_type"])
+        art.owner = data.get("owner")
+        return art
+
+# Artwork Manager + Admin Tools
+class ArtworkManager:
+    def __init__(self):
+        self._artworks: List[Artwork] = []
+        self._admin_log: List[Dict[str, Any]] = []
+
+    @property
+    def artworks(self) -> List[Artwork]:
+        return list(self._artworks)
+
+    def upload_artwork(self, artwork: Artwork, user_id: str) -> int:
+        artwork.owner = user_id
+        self._artworks.append(artwork)
+        self._log_action("upload", user_id, {"title": artwork.title})
+        return len(self._artworks) - 1
+
+    def edit_artwork(self, artwork_id: int, updates: Dict[str, Any]):
+        art = self._artworks[artwork_id]
+        for key, value in updates.items():
+            if hasattr(art, key):
+                setattr(art, key, value)
+        self._log_action("edit", art.owner, updates)
+
+    def delete_artwork(self, artwork_id: int, user_id: str, is_admin: bool = False):
+        art = self._artworks[artwork_id]
+        if not is_admin and art.owner != user_id:
+            raise PermissionError("Not allowed")
+        del self._artworks[artwork_id]
+        self._log_action("delete", user_id, {"artwork_id": artwork_id})
+
+#Integration Tests
+import pytest
+
+def test_user_register_and_upload_artwork_flow():
+    users = UserManager()
+    artworks = ArtworkManager()
+
+    users.register_user("helen", "pw")
+    user = users.login_user("helen", "pw")
+
+    art = Painting("Sunset", "Helen", 2024, "Oil")
+    art_id = artworks.upload_artwork(art, user.username)
+
+    assert artworks.artworks[art_id].owner == "helen"
+
+
+def test_artwork_manager_coordinates_artwork_and_owner():
+    manager = ArtworkManager()
+    art = Sculpture("Statue", "Naode", 2000, "Marble")
+
+    manager.upload_artwork(art, "naode")
+
+    stored = manager.artworks[0]
+    assert stored.owner == "naode"
+    assert "Sculpture" in stored.display_info()
+
+
+def test_edit_artwork_propagates_changes():
+    manager = ArtworkManager()
+    art = DigitalArt("Pixels", "Eve", 2022, "PNG")
+
+    manager.upload_artwork(art, "eve")
+    manager.edit_artwork(0, {"year": 2023, "file_type": "JPEG"})
+
+    updated = manager.artworks[0]
+    assert updated.year == 2023
+    assert updated.file_type == "JPEG"
+
+
+def test_delete_requires_owner_or_admin():
+    manager = ArtworkManager()
+    art = Painting("Forest", "Osemeke", 2019, "Acrylic")
+
+    manager.upload_artwork(art, "osemeke")
+
+    with pytest.raises(PermissionError):
+        manager.delete_artwork(0, "gavin")
+
+    manager.delete_artwork(0, "admin", is_admin=True)
+    assert len(manager.artworks) == 0
+
+
+def test_multiple_artworks_managed_together():
+    manager = ArtworkManager()
+    manager.upload_artwork(Painting("A", "X", 2000, "Oil"), "x")
+    manager.upload_artwork(Sculpture("B", "Y", 2001, "Stone"), "y")
+
+    assert len(manager.artworks) == 2
+
+#System Test
+import json
+
+def test_save_and_load_complete_system_state():
+    manager = ArtworkManager()
+    manager.upload_artwork(Painting("Sky", "Gavin", 2010, "Oil"), "gavin")
+    manager.upload_artwork(DigitalArt("Code Art", "Osemeke", 2022, "SVG"), "osemeke")
+
+    saved = [art.to_dict() for art in manager.artworks]
+
+    restored = []
+    for item in saved:
+        if item["type"] == "painting":
+            restored.append(Painting.from_dict(item))
+        elif item["type"] == "digital":
+            restored.append(DigitalArt.from_dict(item))
+
+    assert len(restored) == 2
+    assert restored[1].file_type == "SVG"
+
+
+def test_import_artworks_from_json():
+    json_data = """
+    [
+        {"type": "sculpture", "title": "Form", "artist": "Zed", "year": 2005, "material": "Bronze", "owner": "zed"}
+    ]
+    """
+    data = json.loads(json_data)
+    art = Sculpture.from_dict(data[0])
+
+    assert art.material == "Bronze"
+    assert art.owner == "zed"
+
+
+def test_export_artwork_summary_report():
+    manager = ArtworkManager()
+    manager.upload_artwork(Painting("Hill", "A", 1995, "Oil"), "a")
+    manager.upload_artwork(Sculpture("Rock", "B", 1996, "Stone"), "b")
+
+    report = [a.display_info() for a in manager.artworks]
+    assert "Painting" in report[0]
+    assert "Sculpture" in report[1]
